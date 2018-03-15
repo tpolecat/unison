@@ -204,6 +204,12 @@ object Term {
 
   import F._
 
+  def maxBinderDepth(t: Term)(implicit F: Traverse[F]): Int = t match {
+    case Abs(name, body) => maxBinderDepth(body)(F) + 1
+    case Var(_) => 0
+    case Tm(f) => (F.toVector(f).map(t => maxBinderDepth(t)(F)) :+ 0).max
+  }
+
   // smart patterns and constructors
   object Lam1 {
     def unapply[A](t: AnnotatedTerm[F,A]): Option[(Name,AnnotatedTerm[F,A])] = t match {
