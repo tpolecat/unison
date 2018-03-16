@@ -13,19 +13,35 @@ object compilation2 {
   val K = 4
 
   abstract class Computation(val decompile: Term) { self =>
+    /*
+     * Computations take a stack as an argument, represented
+     * with a mix of regular parameters and arrays. We have
+     * separate stacks for boxed and unboxed parameters.
+     *
+     * Layout of parameters:
+     *   x0 is the top of the stack, x1 is below it, we call these "registers".
+     *   x0b is the top boxed stack element, x1b is below it, etc.
+     *   stackB(top) has 4 elements above it in the stack
+     *   stackB(top - 1) has 5 elements above it in the stack
+     *   stackB(0) is the bottom of the stack
+     *   stackU is the same, but for unboxed values.
+     *
+     * To push onto the stack, x0 is copied to x1, x1 is copied to
+     * x2, and x3 is "spilled" into the array portion of the stack.
+     * As an important optimization, if x3 is no longer being referenced
+     * by the subsequent computation, this spilling can be elided.
+     */
     def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                            x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                           top: Int,
                            r: R): U
 
-    /**
-     * Gives this computation a fresh `stackU` and `stackB` to work with,
-     * of the given `size`.
-     */
-    def freshenStack(size: Int): Computation = new Computation(decompile) {
+    def incrementTop: Computation = new Computation(null) {
       def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                              x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                             top: Int,
                              r: R): U =
-        self(rec, x0, x1, x2, x3, new Array[U](size), x0b, x1b, x2b, x3b, new Array[B](size), r)
+        self(rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, top + 1, r)
     }
 
     /** Push `this` onto the stack, then call into `body`. */
@@ -35,11 +51,13 @@ object compilation2 {
         val pushB = push1B(env, freeVars)
         def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                                x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                               top: Int,
                                r: R): U = {
-          val vbinding = eval(binding, rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, r)
+          val vbinding = eval(binding, rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, top, r)
           val vbindingb = r.boxed
-          self(rec, vbinding,  x0,  x1,  x2,  pushU(stackU, x3),
-                    vbindingb, x0b, x1b, x2b, pushB(stackB, x3b), r)
+          self(rec, vbinding,  x0,  x1,  x2,  pushU(stackU, top, x3),
+                    vbindingb, x0b, x1b, x2b, pushB(stackB, top, x3b),
+                    top, r)
         }
       }
 
@@ -54,64 +72,69 @@ object compilation2 {
         case 0 => new Computation(null) {
           def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                                  x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                                 top: Int,
                                  r: R): U = {
-            val vself = eval(self, rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, r)
+            val vself = eval(self, rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, top, r)
             val vselfb = r.boxed
             if (bodyIsSelf)
-              rec.body(rec, vself,  x1,  x2,  x3, stackU, vselfb, x1b, x2b, x3b, stackB, r)
+              rec.body(rec, vself,  x1,  x2,  x3, stackU, vselfb, x1b, x2b, x3b, stackB, top, r)
             else
-              body(rec, vself,  x1,  x2,  x3, stackU, vselfb, x1b, x2b, x3b, stackB, r)
+              body(rec, vself,  x1,  x2,  x3, stackU, vselfb, x1b, x2b, x3b, stackB, top, r)
           }
         }
         case 1 => new Computation(null) {
           def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                                  x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                                 top: Int,
                                  r: R): U = {
-            val vself = eval(self, rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, r)
+            val vself = eval(self, rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, top, r)
             val vselfb = r.boxed
             if (bodyIsSelf)
-              rec.body(rec, x0, vself, x2, x3, stackU, x0b, vselfb, x2b, x3b, stackB, r)
+              rec.body(rec, x0, vself, x2, x3, stackU, x0b, vselfb, x2b, x3b, stackB, top, r)
             else
-              body(rec, x0, vself, x2, x3, stackU, x0b, vselfb, x2b, x3b, stackB, r)
+              body(rec, x0, vself, x2, x3, stackU, x0b, vselfb, x2b, x3b, stackB, top, r)
           }
         }
         case 2 => new Computation(null) {
           def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                                  x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                                 top: Int,
                                  r: R): U = {
-            val vself = eval(self, rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, r)
+            val vself = eval(self, rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, top, r)
             val vselfb = r.boxed
             if (bodyIsSelf)
-              rec.body(rec, x0,  x1,  vself,  x3, stackU, x0b, x1b, vselfb, x3b, stackB, r)
+              rec.body(rec, x0,  x1,  vself,  x3, stackU, x0b, x1b, vselfb, x3b, stackB, top, r)
             else
-              body(rec, x0,  x1,  vself,  x3, stackU, x0b, x1b, vselfb, x3b, stackB, r)
+              body(rec, x0,  x1,  vself,  x3, stackU, x0b, x1b, vselfb, x3b, stackB, top, r)
           }
         }
         case 3 => new Computation(null) {
           def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                                  x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                                 top: Int,
                                  r: R): U = {
-            val vself = eval(self, rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, r)
+            val vself = eval(self, rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, top, r)
             val vselfb = r.boxed
             if (bodyIsSelf)
-              rec.body(rec, x0,  x1,  x3,  vself,  stackU, x0b, x1b, x3b, vselfb, stackB, r)
+              rec.body(rec, x0,  x1,  x3,  vself,  stackU, x0b, x1b, x3b, vselfb, stackB, top, r)
             else
-              body(rec, x0,  x1,  x3,  vself,  stackU, x0b, x1b, x3b, vselfb, stackB, r)
+              body(rec, x0,  x1,  x3,  vself,  stackU, x0b, x1b, x3b, vselfb, stackB, top, r)
           }
         }
         case index => new Computation(null) {
           val m = index - K
           def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                                  x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                                 top: Int,
                                  r: R): U = {
-            val vself = eval(self, rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, r)
+            val vself = eval(self, rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, top, r)
             val vselfb = r.boxed
-            stackU(m) = vself
-            stackB(m) = vselfb
+            stackU(top + m) = vself
+            stackB(top + m) = vselfb
             if (bodyIsSelf)
-              rec.body(rec, x0,  x1,  x3,  vself,  stackU, x0b, x1b, x3b, vselfb, stackB, r)
+              rec.body(rec, x0,  x1,  x3,  vself,  stackU, x0b, x1b, x3b, vselfb, stackB, top, r)
             else
-              body(rec, x0,  x1,  x3,  vself,  stackU, x0b, x1b, x3b, vselfb, stackB, r)
+              body(rec, x0,  x1,  x3,  vself,  stackU, x0b, x1b, x3b, vselfb, stackB, top, r)
           }
         }
       }
@@ -120,6 +143,7 @@ object compilation2 {
     def dynamicCall(args: Array[Computation]): Computation = new Computation(null) {
       def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                              x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                             top: Int,
                              r: R): U = {
         ???
         // basically, evaluate this, then check
@@ -143,7 +167,7 @@ object compilation2 {
   case class Self(name: Name) extends Computation(Term.Var(name)) {
     def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                            x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
-              r: R): U = { r.boxed = rec; U0 }
+              top: Int, r: R): U = { r.boxed = rec; U0 }
   }
 
   case class Return(v: Value) extends Computation(v.decompile) {
@@ -154,31 +178,39 @@ object compilation2 {
       case f : Lambda => new Computation(f.decompile) {
         def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                                x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                               top: Int,
                                r: R): U = { r.boxed = f; U0 }
       }
     }
     def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                            x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
-                           r: R): U = c(rec, x0, x1, x2, x3, stackU,
-                                             x0b, x1b, x2b, x3b, stackB, r)
+                           top: Int,
+                           r: R): U =
+      c(rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, top, r)
   }
 
-  abstract class Push1U { def apply(arr: Array[U], u: U): Array[U] }
-  abstract class Push1B { def apply(arr: Array[B], u: B): Array[B] }
+  abstract class Push1U { def apply(arr: Array[U], top: Int, u: U): Array[U] }
+  abstract class Push1B { def apply(arr: Array[B], top: Int, u: B): Array[B] }
 
   def push1U(env: Vector[Name], freeVars: Set[Name]): Push1U =
     // if x3 is garbage or we no longer care about it, avoid setting
     if (env.length < K || !freeVars.contains(env(K - 1))) new Push1U {
-      def apply(arr: Array[U], u: U) = arr
+      def apply(arr: Array[U], top: Int, u: U) = arr
     }
-    else new Push1U { val i = env.length - K; def apply(arr: Array[U], u: U) = { arr(i) = u; arr } }
+    else new Push1U {
+      val i = env.length - K
+      def apply(arr: Array[U], top: Int, u: U) = { arr(top + i) = u; arr }
+    }
 
   def push1B(env: Vector[Name], freeVars: Set[Name]): Push1B =
     // if x3 is garbage or we no longer care about it, avoid setting
     if (env.length < K || !freeVars.contains(env(K - 1))) new Push1B {
-      def apply(arr: Array[B], b: B) = arr
+      def apply(arr: Array[B], top: Int, b: B) = arr
     }
-    else new Push1B { val i = env.length - K; def apply(arr: Array[B], b: B) = { arr(i) = b; arr } }
+    else new Push1B {
+      val i = env.length - K
+      def apply(arr: Array[B], top: Int, b: B) = { arr(top + i) = b; arr }
+    }
 
   def compile(builtins: Name => Computation)(
     e: Term, env: Vector[Name], currentRec: CurrentRec, recVars: RecursiveVars,
@@ -187,6 +219,7 @@ object compilation2 {
       case Term.Num(n) => new Computation(e) {
         def apply(rec: Lambda, x1: U, x2: U, x3: U, x4: U, stackU: Array[U],
                                x1b: B, x2b: B, x3b: B, x4b: B, stackB: Array[B],
+                               top: Int,
                                r: R): U = { r.boxed = null; n } // todo - think through whether can elide
       }
       case Term.Builtin(name) => builtins(name)
@@ -218,11 +251,12 @@ object compilation2 {
           new Computation(e) {
             def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                                    x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                                   top: Int,
                                    r: R): U = {
               val evaledFreeVars: Map[Name, Term] = compiledFrees.mapValues {
                 c =>
                   val evaluatedVar =
-                    c(rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, r)
+                    c(rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, top, r)
                   val value = Value(evaluatedVar, r.boxed)
                   Term.Compiled2(value)
               }
@@ -231,7 +265,7 @@ object compilation2 {
                 (name, lookup) =>
                   if (currentRec.contains(name)) Term.Self(name)
                   else {
-                    val evaluatedVar = lookup(rec, x0b, x1b, x2b, x3b, stackB)
+                    val evaluatedVar = lookup(rec, x0b, x1b, x2b, x3b, stackB, top)
                     if (evaluatedVar eq null) sys.error(name + " refers to null stack slot.")
                     require (evaluatedVar.isRef)
                     Term.Compiled2(evaluatedVar)
@@ -264,12 +298,11 @@ object compilation2 {
 
         val cfn: Computation = compile(builtins)(fn, env, currentRec, recVars, IsNotTail)
 
-        def saturatedCall(body: Computation, n: Int) = {
-          val r = compiledArgs.take(n)
+        def saturatedCall(body: Computation, n: Int) =
+          compiledArgs.take(n)
             .reverse.zipWithIndex // 0th arg becomes bottom of stack
             .foldRight(body) { (argi, body) => argi._1.bindTo(argi._2)(body) }
-          if (n > K) r.freshenStack(Term.maxBinderDepth(e)) else r
-        }
+            // .makeTailCall(isTail)
 
         cfn match {
           // static call, fully saturated
@@ -316,17 +349,18 @@ object compilation2 {
         // this
         new Computation(e) {
           override def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
-                                          x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B], r: R): U = {
+                                          x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                                          top: Int, r: R): U = {
             lazy val evaledBinding: Ref =
               // eval(cbinding, rec, U0,            x0, x1, x2, pushU(stackU, x3),
               //                     evaledBinding, x0b, x1b, x2b, pushB(stackB, x3b))
               // this might be the general case; for let rec 1, probably can do something simpler?
               // todo: later, can we avoid putting this onto the stack at all? maybe by editing environment
               new Ref(name, () => Value(eval(cbinding, rec, x0, x1, x2, x3, stackU,
-                                                            x0b, x1b, x2b, x3b, stackB, r), r.boxed))
+                                                            x0b, x1b, x2b, x3b, stackB, top, r), r.boxed))
 
-            eval(cbody, rec, U0,            x0, x1, x2, pushU(stackU, x3),
-                             evaledBinding, x0b, x1b, x2b, pushB(stackB, x3b), r)
+            eval(cbody, rec, U0,            x0, x1, x2, pushU(stackU, top, x3),
+                             evaledBinding, x0b, x1b, x2b, pushB(stackB, top, x3b), top, r)
 
           }
         }
@@ -340,14 +374,15 @@ object compilation2 {
   def eval(c: Computation, rec: Lambda,
            x0: U,  x1: U,  x2: U,  x3: U,  stackU: Array[U],
            x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+           top: Int,
            r: R): U =
-    try c(rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, r)
-    catch { case TailCall => loop(r) }
+    try c(rec, x0, x1, x2, x3, stackU, x0b, x1b, x2b, x3b, stackB, top, r)
+    catch { case TailCall => loop(r, top) }
 
-  def loop(r: R): U = {
+  def loop(r: R, top: Int): U = {
     while (true) {
       try return r.tailCall.body(r.tailCall, r.x0, r.x1, r.x2, r.x3, r.stackU,
-                                 r.x0b, r.x1b, r.x2b, r.x3b, r.stackB, r)
+                                 r.x0b, r.x1b, r.x2b, r.x3b, r.stackB, top, r)
       catch { case TailCall => }
     }
     U0
@@ -393,6 +428,7 @@ object compilation2 {
     if (currentRec.contains(name)) new Computation(e) {
       def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                              x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                             top: Int,
                              r: R): U = { r.boxed = rec; U0 }
 
     }
@@ -401,67 +437,61 @@ object compilation2 {
       case 0 => new Computation(e) {
         def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                                x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                               top: Int,
                                r: R): U = { if (x0b ne null) r.boxed = x0b.toValue; x0 }
 
       }
       case 1 => new Computation(e) {
         def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                                x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                               top: Int,
                                r: R): U = { if (x1b ne null) r.boxed = x1b.toValue; x1 }
 
       }
       case 2 => new Computation(e) {
         def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                                x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                               top: Int,
                                r: R): U = { if (x2b ne null) r.boxed = x2b.toValue; x2 }
 
       }
       case 3 => new Computation(e) {
         def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                                x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
+                               top: Int,
                                r: R): U = { if (x3b ne null) r.boxed = x3b.toValue; x3 }
 
       }
       case n => val m = n - K; new Computation(e) {
         def apply(rec: Lambda, x0: U, x1: U, x2: U, x3: U, stackU: Array[U],
                                x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B],
-                               r: R): U = { if (stackB(m) ne null) r.boxed = stackB(m).toValue; stackU(m) }
-
+                               top: Int,
+                               r: R): U = {
+          if (stackB(m) ne null) r.boxed = stackB(top + m).toValue
+          stackU(top + m)
+        }
       }
     }
 
   def compileRef(e: Term, name: Name, env: Vector[Name], currentRec: CurrentRec): ParamLookup = {
     if (currentRec.contains(name)) new ParamLookup {
-      def apply(rec: Lambda, x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B]) =
+      def apply(rec: Lambda, x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B], top: Int) =
         rec
     }
     else env.indexOf(name) match {
       case -1 => sys.error("unbound name: " + name)
-      case 0 => new ParamLookup {
-        def apply(rec: Lambda, x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B]) =
-          x0b
-      }
-      case 1 => new ParamLookup {
-        def apply(rec: Lambda, x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B]) =
-          x1b
-      }
-      case 2 => new ParamLookup {
-        def apply(rec: Lambda, x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B]) =
-          x2b
-      }
-      case 3 => new ParamLookup {
-        def apply(rec: Lambda, x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B]) =
-          x3b
-      }
+      case 0 => new ParamLookup { def apply(rec: Lambda, x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B], top: Int) = x0b }
+      case 1 => new ParamLookup { def apply(rec: Lambda, x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B], top: Int) = x1b }
+      case 2 => new ParamLookup { def apply(rec: Lambda, x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B], top: Int) = x2b }
+      case 3 => new ParamLookup { def apply(rec: Lambda, x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B], top: Int) = x3b }
       case n => val m = n - K; new ParamLookup {
-        def apply(rec: Lambda, x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B]) =
-          stackB(m)
+        def apply(rec: Lambda, x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B], top: Int) =
+          stackB(top + m)
       }
     }
   }
 
   abstract class ParamLookup {
-    def apply(rec: Lambda, x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B]): B
+    def apply(rec: Lambda, x0b: B, x1b: B, x2b: B, x3b: B, stackB: Array[B], top: Int): B
   }
-
 }
