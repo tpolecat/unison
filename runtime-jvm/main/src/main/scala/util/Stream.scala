@@ -42,15 +42,15 @@ abstract class Stream[A] { self =>
     k => self.stage(f andThen k)
 
   /** Only emit elements from `this` for which `f` returns a nonzero value. */
-  final def filter(f: F1[A,U]): Stream[A] =
+  final def filter(f: F1[A,Unboxed[Boolean]]): Stream[A] =
     k => self.stage(Unboxed.choose(f, k, Unboxed.K.noop))
 
   /** Emit the longest prefix of `this` for which `f` returns nonzero. */
-  final def takeWhile(f: F1[A,U]): Stream[A] =
+  final def takeWhile(f: F1[A,Unboxed[Boolean]]): Stream[A] =
     k => self.stage(Unboxed.choose[A](f, k, (_,_) => throw Done))
 
   /** Skip the longest prefix of `this` for which `f` returns nonzero. */
-  final def dropWhile(f: F1[A,U]): Stream[A] =
+  final def dropWhile(f: F1[A,Unboxed[Boolean]]): Stream[A] =
     k => self.stage(Unboxed.switchWhen0(f, Unboxed.K.noop, k)())
 
   final def take(n: Long): Stream[A] =

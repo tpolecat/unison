@@ -168,7 +168,7 @@ object compilation2 {
       def apply(r: R, x0: U): U
       final def apply(r: R, x1: U, x0: U): U = apply(r, x0)
     }
-    abstract class C0U extends C1U {
+    abstract class C0 extends C1U {
       def apply(r: R): U
       final def apply(r: R, x0: U): U = apply(r)
     }

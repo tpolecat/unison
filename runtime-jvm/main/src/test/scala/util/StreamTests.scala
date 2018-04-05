@@ -13,6 +13,18 @@ object StreamTests {
         Stream.from(0.0).take(10000).sum,
         (0 until 10000).sum.toDouble)
     },
+    test("map") { implicit T =>
+      equal(
+        Stream.from(0.0).take(10000).map(Unboxed.F1.U_U((_:U) + 1)).sum,
+        (0 until 10000).map(_ + 1).sum.toDouble
+      )
+    },
+    test("filter") { implicit T =>
+      equal(
+        Stream.from(0.0).take(10000).filter(Unboxed.F1.U_U((_ : Double) % 2 == 0)).sum,
+        (0 until 10000).filter(_.toDouble % 2 == 0).sum.toDouble
+      )
+    },
     test("toSequence") { implicit T =>
       equal(
         Stream.from(0.0).take(10000).toSequence { (u, _) => u },

@@ -62,7 +62,7 @@ object Lib2 {
       override def saturatedNonTailCall(args: List[Computation]) = args match {
         case List(Return(Value.Num(n1)), Return(Value.Num(n2))) =>
           val n3 = f(n1,n2) // constant fold
-          val c : Computation.C0U = r => { r.boxed = null; n3 }
+          val c : Computation.C0 = r => { r.boxed = null; n3 }
           c
         case List(CompiledVar0,Return(Value.Num(n))) =>
           val c : Computation.C1U = (r,x0) => { r.boxed = null; f(x0, n) }

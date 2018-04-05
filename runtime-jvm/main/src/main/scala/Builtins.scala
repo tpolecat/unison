@@ -30,8 +30,8 @@ object Builtins {
     f1("Sequence.size", "seq", (seq: Sequence[Value]) => seq.size)
 
   def c0[A:Decompile](name: String, a: => A)
-                     (implicit A: Encode[A]): (Name, Computation) =
-    (name, (r,rec,top,stackU,x1,x0,stackB,x1b,x0b) => A.encode(r, a))
+                     (implicit A: Encode[A]): (Name, Computation.C0) =
+    (name, r => A.encode(r, a))
 
   def termFor(b: (Name, Computation)): Term = Term.Builtin(b._1)
 

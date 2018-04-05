@@ -1,6 +1,8 @@
 package org.unisonweb.util
 
-import org.unisonweb.compilation2.{U,U0}
+import java.util.function.{DoublePredicate, DoubleUnaryOperator, IntUnaryOperator}
+
+import org.unisonweb.compilation2.{U, U0}
 
 /** Unboxed functions and continuations / callbacks. */
 object Unboxed {
@@ -36,7 +38,8 @@ object Unboxed {
 
     /** Compose two `F1`s. */
     def map[C](f: F1[B,C]): F1[A,C] = new F1[A,C] {
-      def apply[x] = kcx => self.apply(f.apply(kcx))
+      def apply[x] =
+        kcx => self.apply(f.apply(kcx))
     }
 
     def andThen: K[B] => K[A] = kb => {
@@ -65,7 +68,32 @@ object Unboxed {
    * exists a `U => T` for extracting a `T` from the unboxed portion of
    * its representation.
    */
-  sealed abstract class Unboxed[T]
+  // todo: correct comment
+  sealed abstract class Unboxed[U]
+  trait IsUnboxed[@specialized(scala.Unit, scala.Boolean, scala.Int, scala.Float, scala.Long, scala.Double) T] {
+    def fromScala(t: T): U
+    def toScala(u: U): T
+  }
+  object IsUnboxed {
+    implicit val doubleIsUnboxed: IsUnboxed[Double] = new IsUnboxed[Double] {
+      def fromScala(t: Double): U = t
+      def toScala(u: U): Double = u
+    }
+    implicit val boolIsUnboxed: IsUnboxed[Boolean] = new IsUnboxed[Boolean] {
+      def fromScala(t: Boolean): U = if (t) 1.0 else 0.0
+      def toScala(u: U): Boolean = u != 0.0
+    }
+// todo: Long can't be safely represented as Double due to potential "signaling NaN" transformation
+//    implicit val longIsUnboxed: IsUnboxed[Long] = new IsUnboxed[Long] {
+//      override def fromScala(t: Long): U = java.lang.Double.longBitsToDouble(t)
+//      override def toScala(u: U): Long = ???
+//    }
+
+    implicit val intIsUnboxed: IsUnboxed[Int] = new IsUnboxed[Int] {
+      def fromScala(t: Int): U = java.lang.Double.longBitsToDouble(t)
+      def toScala(u: U): Int = java.lang.Double.doubleToRawLongBits(u).toInt
+    }
+  }
 
   object K {
     val noop: K[Any] = (_,_) => {}
@@ -75,16 +103,23 @@ object Unboxed {
    * A continuation which invokes `t` whenver `cond` is nonzero on the
    * input, and which invokes `f` whenever `cond` is zero on the input.
    */
-  def choose[A](cond: F1[A,U], t: K[A], f: K[A]): K[A] = {
-    val ccond = cond[A]((u,_,u2,a) => if (u != U0) t(u2,a) else f(u2,a))
+  def choose[A](cond: F1[A,Unboxed[Boolean]], t: K[A], f: K[A]): K[A] = {
+    val ccond = cond[A](
+      (u,_,u2,a) => if (IsUnboxed.boolIsUnboxed.toScala(u)) t(u2,a) else f(u2,a))
     (u,a) => ccond(u,a,u,a)
   }
+
+//  trait _F1[A,B] { def apply(k: K[B]): K[A] } // try to impl choose if this the rep
+//  def _choose[A](cond: _F1[A,Null], t: K[A], f: K[A]): K[A] = {
+//    val ccond = cond[A]((u,a) => if (u != U0) t(u,a) else (f(u,a)))
+//    (u,a) => ccond(u,a)
+//  }
 
   /**
    * A continuation which acts as `segment1` until `cond` emits 0, then
    * acts as `segment2` forever thereafter.
    */
-  def switchWhen0[A](cond: F1[A,U], segment1: K[A], segment2: K[A]): () => K[A] = () => {
+  def switchWhen0[A](cond: F1[A,Unboxed[Boolean]], segment1: K[A], segment2: K[A]): () => K[A] = () => {
     var switched = false
     val ccond = cond[A]((u,_,u2,a) => if (u == U0) { switched = true; segment1(u2,a) } else segment2(u2,a))
     (u,a) => ccond(u,a,u,a)
@@ -98,6 +133,46 @@ object Unboxed {
     def B_B[A,B](f: A => B): F1[A,B] = new F1[A,B] {
       def apply[x] = kbx => (u,a,u2,x) => kbx(U0, f(a), u2, x)
     }
+
+    // todo: confirm `f` really operates on unboxed, or fix
+    def U_U(f: IntUnaryOperator) = new F1[Unboxed[Int], Unboxed[Int]] {
+      override def apply[X]: K2[Unboxed[Int], X] => K2[Unboxed[Int], X] =
+        kout => (u,x,u2,x2) =>
+          kout(
+            IsUnboxed.intIsUnboxed.fromScala(
+              f.applyAsInt(IsUnboxed.intIsUnboxed.toScala(u))
+            ), x, u2, x2
+          )
+    }
+
+    def U_U(f: DoubleUnaryOperator) = new F1[Unboxed[Double], Unboxed[Double]] {
+      def apply[X]: K2[Unboxed[Double], X] => K2[Unboxed[Double], X] =
+        kout => (u,x,u2,x2) =>
+          kout(
+            IsUnboxed.doubleIsUnboxed.fromScala(
+              f.applyAsDouble(IsUnboxed.doubleIsUnboxed.toScala(u))
+            ), x, u2, x2
+          )
+    }
+
+    def U_U(f: DoublePredicate) = new F1[Unboxed[Double], Unboxed[Boolean]] {
+      def apply[X]: K2[Unboxed[Boolean], X] => K2[Unboxed[Double], X] =
+        kout => (u,x,u2,x2) =>
+          kout(
+            IsUnboxed.boolIsUnboxed.fromScala(
+              f.test(IsUnboxed.doubleIsUnboxed.toScala(u))
+            ), x.asInstanceOf, u2, x2
+          )
+    }
+
+//    def U_U[A,B](f: A => B)(implicit A: IsUnboxed[A], B: IsUnboxed[B]) =
+//      new F1[Unboxed[A], Unboxed[B]] {
+//        def apply[x] = kout => (u,x,u2,x2) =>
+//          kout(
+//            B.fromScala(f(A.toScala(u))), x.asInstanceOf,
+//            u2, x2
+//          )
+//      }
   }
 
   object F2 {
