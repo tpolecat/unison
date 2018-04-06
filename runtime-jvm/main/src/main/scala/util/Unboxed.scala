@@ -109,10 +109,17 @@ object Unboxed {
     (u,a) => ccond(u,a,u,a)
   }
 
-//  trait _F1[A,B] { def apply(k: K[B]): K[A] } // try to impl choose if this the rep
-//  def _choose[A](cond: _F1[A,Null], t: K[A], f: K[A]): K[A] = {
-//    val ccond = cond[A]((u,a) => if (u != U0) t(u,a) else (f(u,a)))
-//    (u,a) => ccond(u,a)
+//  object Ex1 {
+//    abstract class K[-A] { def apply(u: U, a: A): Unit }
+//    trait F1[A,B] { def apply(k: K[B]): K[A] } // try to impl choose if this the rep
+//    def choose[A](cond: F1[A,Unboxed[Boolean]], t: K[A], f: K[A]): K[A] = {
+//      val kb = new K[Unboxed[Boolean]] {
+//        override def apply(u: U, a: Unboxed[Boolean]): Unit =
+//          if (u != U0) t(u,a) else (f(u,a))
+//      }
+//      val ccond: K[A] = cond(kb)
+//      (u,a) => ccond(u,a)
+//    }
 //  }
 
   /**
