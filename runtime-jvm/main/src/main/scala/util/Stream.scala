@@ -2,8 +2,8 @@ package org.unisonweb
 package util
 
 import Stream._
-import compilation2.{U,U0}
-import Unboxed.{F1,F2,K,Unboxed}
+import compilation2.{U, U0}
+import Unboxed.{F1, F2, IsUnboxed, K, Unboxed}
 
 /**
  * Fused stream type based loosely on ideas from Oleg's
@@ -127,12 +127,17 @@ object Stream {
   case object Done extends Throwable { override def fillInStackTrace = this }
   // idea: case class More(s: Step) extends Throwable { override def fillInStackTrace = this }
 
-  final def constant(n: U): Stream[Unboxed[U]] =
-    k => () => k(n, null)
+  final def constant[A:IsUnboxed](a: A): Stream[Unboxed[A]] =
+    IsUnboxed.fromScala(a) match {
+      case n => k => () => k(n, null)
+    }
 
-  final def from(n: U): Stream[Unboxed[U]] =
-    k => {
-      var i = n - 1
-      () => { i += 1; k(i,null) }
+  final def from[A:IsUnboxed](a: A): Stream[Unboxed[A]] =
+    IsUnboxed.fromScala(a) match {
+      case n =>
+        k => {
+          var i = n - 1
+          () => { i += 1; k(i,null) }
+        }
     }
 }

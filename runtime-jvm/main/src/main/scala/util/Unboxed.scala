@@ -1,6 +1,5 @@
 package org.unisonweb.util
 
-import java.util.function.{DoublePredicate, DoubleUnaryOperator, IntUnaryOperator}
 
 import org.unisonweb.compilation2.{U, U0}
 
@@ -75,6 +74,9 @@ object Unboxed {
     def toScala(u: U): T
   }
   object IsUnboxed {
+    def fromScala[T](t: T)(implicit T: IsUnboxed[T]): U = T.fromScala(t)
+    def toScala[T](u: U)(implicit T: IsUnboxed[T]): T = T.toScala(u)
+
     implicit val doubleIsUnboxed: IsUnboxed[Double] = new IsUnboxed[Double] {
       def fromScala(t: Double): U = t
       def toScala(u: U): Double = u
@@ -128,7 +130,11 @@ object Unboxed {
    */
   def switchWhen0[A](cond: F1[A,Unboxed[Boolean]], segment1: K[A], segment2: K[A]): () => K[A] = () => {
     var switched = false
-    val ccond = cond[A]((u,_,u2,a) => if (u == U0) { switched = true; segment1(u2,a) } else segment2(u2,a))
+    val ccond = cond[A]((u,_,u2,a) =>
+                          if (switched || !IsUnboxed.boolIsUnboxed.toScala(u)) {
+                            switched = true
+                            segment2(u2, a)
+                          } else segment1(u2, a))
     (u,a) => ccond(u,a,u,a)
   }
 
@@ -142,43 +148,44 @@ object Unboxed {
     }
 
     // todo: confirm `f` really operates on unboxed, or fix
+    import java.util.function.{DoublePredicate, DoubleUnaryOperator, IntUnaryOperator}
     def U_U(f: IntUnaryOperator) = new F1[Unboxed[Int], Unboxed[Int]] {
       override def apply[X]: K2[Unboxed[Int], X] => K2[Unboxed[Int], X] =
-        kout => (u,x,u2,x2) =>
+        kout => (u,_,u2,x2) =>
           kout(
             IsUnboxed.intIsUnboxed.fromScala(
               f.applyAsInt(IsUnboxed.intIsUnboxed.toScala(u))
-            ), x, u2, x2
+            ), null, u2, x2
           )
     }
 
     def U_U(f: DoubleUnaryOperator) = new F1[Unboxed[Double], Unboxed[Double]] {
       def apply[X]: K2[Unboxed[Double], X] => K2[Unboxed[Double], X] =
-        kout => (u,x,u2,x2) =>
+        kout => (u,_,u2,x) =>
           kout(
             IsUnboxed.doubleIsUnboxed.fromScala(
               f.applyAsDouble(IsUnboxed.doubleIsUnboxed.toScala(u))
-            ), x, u2, x2
+            ), null, u2, x
           )
     }
 
     def U_U(f: DoublePredicate) = new F1[Unboxed[Double], Unboxed[Boolean]] {
       def apply[X]: K2[Unboxed[Boolean], X] => K2[Unboxed[Double], X] =
-        kout => (u,x,u2,x2) =>
+        kout => (u,_,u2,x) =>
           kout(
             IsUnboxed.boolIsUnboxed.fromScala(
-              f.test(IsUnboxed.doubleIsUnboxed.toScala(u))
-            ), x.asInstanceOf, u2, x2
+              f.test(IsUnboxed.doubleIsUnboxed.toScala(u))), null, u2, x
           )
     }
 
-//    def U_U[A,B](f: A => B)(implicit A: IsUnboxed[A], B: IsUnboxed[B]) =
+    // still doesn't specialize Function1 :(
+//    def U_U[@specialized(scala.Int, scala.Long, scala.Double) A: IsUnboxed,
+//            @specialized(scala.Boolean, scala.Int, scala.Long, scala.Double) B: IsUnboxed]
+//            (f: A => B): F1[Unboxed[A], Unboxed[B]] =
 //      new F1[Unboxed[A], Unboxed[B]] {
-//        def apply[x] = kout => (u,x,u2,x2) =>
-//          kout(
-//            B.fromScala(f(A.toScala(u))), x.asInstanceOf,
-//            u2, x2
-//          )
+//        def apply[x]: K2[Unboxed[B], x] => K2[Unboxed[A], x] =
+//          kout => (u, _, u2, x) =>
+//            kout(IsUnboxed.fromScala(f(IsUnboxed.toScala[A](u))), null, u2, x)
 //      }
   }
 
