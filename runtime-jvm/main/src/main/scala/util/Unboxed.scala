@@ -1,6 +1,8 @@
 package org.unisonweb.util
 
 
+import java.util.function._
+
 import org.unisonweb.compilation2.{U, U0}
 
 /** Unboxed functions and continuations / callbacks. */
@@ -69,31 +71,45 @@ object Unboxed {
    */
   // todo: correct comment
   sealed abstract class Unboxed[U]
-  trait IsUnboxed[@specialized(scala.Unit, scala.Boolean, scala.Int, scala.Float, scala.Long, scala.Double) T] {
+
+  trait IsUnboxed[T] {
     def fromScala(t: T): U
     def toScala(u: U): T
   }
+
+  trait IsNumeric[T] extends IsUnboxed[T] {
+    val zero: T
+    def plus(a: T, b: T): T
+    def minus(a: T, b: T): T
+  }
+
   object IsUnboxed {
-    def fromScala[T](t: T)(implicit T: IsUnboxed[T]): U = T.fromScala(t)
-    def toScala[T](u: U)(implicit T: IsUnboxed[T]): T = T.toScala(u)
-
-    implicit val doubleIsUnboxed: IsUnboxed[Double] = new IsUnboxed[Double] {
-      def fromScala(t: Double): U = t
-      def toScala(u: U): Double = u
+    implicit object doubleIsUnboxed {//extends IsNumeric[Double] {
+      @inline final def fromScala(t: Double): U = U(java.lang.Double.doubleToRawLongBits(t))
+      @inline final def toScala(u: U): Double = java.lang.Double.longBitsToDouble(u)
+      @inline final val zero: Double = 0.0
+      @inline final def plus(a: Double, b: Double): Double = a + b
+      @inline final def minus(a: Double, b: Double): Double = a - b
     }
-    implicit val boolIsUnboxed: IsUnboxed[Boolean] = new IsUnboxed[Boolean] {
-      def fromScala(t: Boolean): U = if (t) 1.0 else 0.0
-      def toScala(u: U): Boolean = u != 0.0
+    implicit object boolIsUnboxed {//extends IsUnboxed[Boolean] {
+      @inline final def fromScala(t: Boolean): U = if (t) U.True else U.False
+      @inline final def toScala(u: U): Boolean = u == U.True
     }
-// todo: Long can't be safely represented as Double due to potential "signaling NaN" transformation
-//    implicit val longIsUnboxed: IsUnboxed[Long] = new IsUnboxed[Long] {
-//      override def fromScala(t: Long): U = java.lang.Double.longBitsToDouble(t)
-//      override def toScala(u: U): Long = ???
-//    }
 
-    implicit val intIsUnboxed: IsUnboxed[Int] = new IsUnboxed[Int] {
-      def fromScala(t: Int): U = java.lang.Double.longBitsToDouble(t)
-      def toScala(u: U): Int = java.lang.Double.doubleToRawLongBits(u).toInt
+    implicit object longIsUnboxed {//extends IsNumeric[Long] {
+      @inline final def fromScala(t: Long): U = U(t)
+      @inline final def toScala(u: U): Long = u.toLong
+      @inline final val zero: Long = 0l
+      @inline final def plus(a: Long, b: Long): Long = a + b
+      @inline final def minus(a: Long, b: Long): Long = a - b
+    }
+
+    implicit object intIsUnboxed extends IsNumeric[Int] {
+      @inline final def fromScala(t: Int): U = t.toLong
+      @inline final def toScala(u: U): Int = u.toInt
+      @inline final val zero: Int = 0
+      @inline final def plus(a: Int, b: Int): Int = a + b
+      @inline final def minus(a: Int, b: Int): Int = a - b
     }
   }
 
@@ -149,7 +165,7 @@ object Unboxed {
 
     // todo: confirm `f` really operates on unboxed, or fix
     import java.util.function.{DoublePredicate, DoubleUnaryOperator, IntUnaryOperator}
-    def U_U(f: IntUnaryOperator) = new F1[Unboxed[Int], Unboxed[Int]] {
+    def I_I(f: IntUnaryOperator) = new F1[Unboxed[Int], Unboxed[Int]] {
       override def apply[X]: K2[Unboxed[Int], X] => K2[Unboxed[Int], X] =
         kout => (u,_,u2,x2) =>
           kout(
@@ -159,23 +175,42 @@ object Unboxed {
           )
     }
 
-    def U_U(f: DoubleUnaryOperator) = new F1[Unboxed[Double], Unboxed[Double]] {
-      def apply[X]: K2[Unboxed[Double], X] => K2[Unboxed[Double], X] =
-        kout => (u,_,u2,x) =>
-          kout(
-            IsUnboxed.doubleIsUnboxed.fromScala(
-              f.applyAsDouble(IsUnboxed.doubleIsUnboxed.toScala(u))
-            ), null, u2, x
-          )
+    def L_L(f: LongUnaryOperator) = new F1[Unboxed[Long], Unboxed[Long]] {
+      import IsUnboxed.longIsUnboxed.{fromScala, toScala}
+      override def apply[X]: K2[Unboxed[Long], X] => K2[Unboxed[Long], X] =
+        kout => (u,_,u2,x2) =>
+          kout(fromScala(f.applyAsLong(toScala(u))), null, u2, x2)
     }
 
-    def U_U(f: DoublePredicate) = new F1[Unboxed[Double], Unboxed[Boolean]] {
+    def D_D(f: DoubleUnaryOperator) = new F1[Unboxed[Double], Unboxed[Double]] {
+      import IsUnboxed.doubleIsUnboxed.{fromScala, toScala}
+      def apply[X]: K2[Unboxed[Double], X] => K2[Unboxed[Double], X] =
+        kout => (u,_,u2,x) =>
+          kout(fromScala(f.applyAsDouble(toScala(u))), null, u2, x)
+    }
+
+    def D_B(f: DoublePredicate) = new F1[Unboxed[Double], Unboxed[Boolean]] {
+      import IsUnboxed.boolIsUnboxed.fromScala
+      import IsUnboxed.doubleIsUnboxed.toScala
       def apply[X]: K2[Unboxed[Boolean], X] => K2[Unboxed[Double], X] =
         kout => (u,_,u2,x) =>
-          kout(
-            IsUnboxed.boolIsUnboxed.fromScala(
-              f.test(IsUnboxed.doubleIsUnboxed.toScala(u))), null, u2, x
-          )
+          kout(fromScala(f.test(toScala(u))), null, u2, x)
+    }
+
+    def I_B(f: IntPredicate) = new F1[Unboxed[Int], Unboxed[Boolean]] {
+      import IsUnboxed.intIsUnboxed.toScala
+      import IsUnboxed.boolIsUnboxed.fromScala
+      def apply[X]: K2[Unboxed[Boolean], X] => K2[Unboxed[Int], X] =
+        kout => (u,_,u2,x) =>
+          kout(fromScala(f.test(toScala(u))), null, u2, x)
+    }
+
+    def L_B(f: LongPredicate) = new F1[Unboxed[Long], Unboxed[Boolean]] {
+      import IsUnboxed.longIsUnboxed.toScala
+      import IsUnboxed.boolIsUnboxed.fromScala
+      def apply[X]: K2[Unboxed[Boolean], X] => K2[Unboxed[Long], X] =
+        kout => (u,_,u2,x) =>
+          kout(fromScala(f.test(toScala(u))), null, u2, x)
     }
 
     // still doesn't specialize Function1 :(
@@ -187,6 +222,10 @@ object Unboxed {
 //          kout => (u, _, u2, x) =>
 //            kout(IsUnboxed.fromScala(f(IsUnboxed.toScala[A](u))), null, u2, x)
 //      }
+
+    type U_U = UnboxedUnaryOperator
+    abstract class UnboxedUnaryOperator { def apply(u: U): U }
+    abstract class BooleanUnaryOperator { def apply(b: Boolean): Boolean }
   }
 
   object F2 {
@@ -194,7 +233,7 @@ object Unboxed {
      * Convert a Scala `(A,B) => C` to an `F2[A,B,C]` that acts on boxed input and produces boxed output.
      * Named `BB_B` since it takes two boxed input and produces boxed output.
      */
-    def BB_B[A,B,C](f: (A,B) => C): F2[A,B,C] = new F2[A,B,C] {
+    def XX_X[A,B,C](f: (A,B) => C): F2[A,B,C] = new F2[A,B,C] {
       def apply[x] = kcx => (u,a,u2,b,u3,x) => kcx(U0, f(a,b), u3, x)
     }
 
@@ -206,6 +245,60 @@ object Unboxed {
       def apply[x] = kux => (u,_,u2,_,u3,x) => kux(fn(u,u2),null,u3,x)
     }
 
-    abstract class UU_U { def apply(u: U, u2: U): U }
+    type UU_U = UnboxedBinaryOperator
+    abstract class UnboxedBinaryOperator { def apply(u: U, u2: U): U }
+    abstract class DoubleBinaryPredicate { def apply(u: Double, u2: Double): Boolean }
+    abstract class LongBinaryPredicate { def apply(u: Long, u2: Long): Boolean }
+
+    def II_I_val(fn: IntBinaryOperator): F2[Unboxed[Int], Unboxed[Int], Unboxed[Int]] = {
+      val i = IsUnboxed.intIsUnboxed
+      class II_I extends F2[Unboxed[Int], Unboxed[Int], Unboxed[Int]] {
+        def apply[x] =
+          kux =>
+            (u,_,u2,_,u3,x) => {
+              val s = i.toScala(u)//: @inline
+              val s2 = i.toScala(u2)//: @inline
+              val sr = fn.applyAsInt(s, s2)
+              val ur = i.fromScala(sr)//: @inline
+              kux(ur, null, u3, x)
+            }
+      }
+      new II_I
+    }
+
+    def II_I_import(fn: IntBinaryOperator): F2[Unboxed[Int], Unboxed[Int], Unboxed[Int]] = {
+      import IsUnboxed.intIsUnboxed.{toScala, fromScala}
+      class II_I extends F2[Unboxed[Int], Unboxed[Int], Unboxed[Int]] {
+        def apply[x] =
+          kux =>
+            (u,_,u2,_,u3,x) => {
+              val s = toScala(u)//: @inline
+              val s2 = toScala(u2)//: @inline
+              val sr = fn.applyAsInt(s, s2)
+              val ur = fromScala(sr)//: @inline
+              kux(ur, null, u3, x)
+            }
+      }
+      new II_I
+    }
+
+    def II_I_manually_inline(fn: IntBinaryOperator): F2[Unboxed[Int], Unboxed[Int], Unboxed[Int]] = {
+      class II_I extends F2[Unboxed[Int], Unboxed[Int], Unboxed[Int]] {
+        def apply[x] =
+          kux =>
+            (u,_,u2,_,u3,x) => {
+              kux(fn.applyAsInt(u.toInt, u2.toInt).toLong, null, u3, x)
+            }
+      }
+      new II_I
+    }
+
+    def LL_L(fn: LongBinaryOperator) = new F2[Unboxed[Long], Unboxed[Long], Unboxed[Long]] {
+      import IsUnboxed.longIsUnboxed.{toScala,fromScala}
+      def apply[x] =
+        kux =>
+          (u,_,u2,_,u3,x) =>
+            kux(fromScala(fn.applyAsLong(toScala(u),toScala(u2))),null,u3,x)
+    }
   }
 }

@@ -1,14 +1,43 @@
 package org.unisonweb
 
+import java.util.function.{DoubleBinaryOperator, DoubleUnaryOperator, IntBinaryOperator}
+
 import org.unisonweb.Term.{Name, Term}
 import org.unisonweb.compilation2.Value.Lambda
+import org.unisonweb.util.Unboxed.F1.{BooleanUnaryOperator, U_U}
+import org.unisonweb.util.Unboxed.F2.{DoubleBinaryPredicate, UU_U}
+import org.unisonweb.util.Unboxed.IsUnboxed.{boolIsUnboxed => bool, doubleIsUnboxed => double, intIsUnboxed => int}
 
 object compilation2 {
 
-  type U = Double // unboxed values
-  val U0: U = 0
-  val True: U = 1
-  val False: U = 0
+//  case class U(raw: Double) extends AnyVal // unboxed values
+//  ^ todo: waiting for https://github.com/scala/bug/issues/10814
+
+  type U = Long
+  object U {
+    @inline def apply(raw: Long): U = raw // https://github.com/scala/bug/issues/10814
+    def liftBB(f: BooleanUnaryOperator): U_U =
+      u => bool.fromScala(!bool.toScala(u))
+
+    def liftDD(f: DoubleUnaryOperator): U_U =
+      u => double.fromScala(-double.toScala(u))
+
+    def liftIII(f: IntBinaryOperator): UU_U =
+      (u, u2) => int.fromScala(f.applyAsInt(int.toScala(u), int.toScala(u2)))
+
+    def liftDDD(f: DoubleBinaryOperator): UU_U =
+      (u, u2) => double.fromScala(f.applyAsDouble(double.toScala(u), double.toScala(u2)))
+
+    def liftDDB(f: DoubleBinaryPredicate): UU_U =
+      (u, u2) => bool.fromScala(f(double.toScala(u), double.toScala(u2)))
+
+    val U0: U = U(0)
+    val True: U = U(1)
+    val False: U = U(0)
+  }
+  val U0: U = U.U0
+  val True: U = U.True
+  val False: U = U.False
   type B = Param // boxed values
   type R = Result
   type Arity = Int

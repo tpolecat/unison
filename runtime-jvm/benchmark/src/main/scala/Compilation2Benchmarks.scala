@@ -41,13 +41,31 @@ object Compilation2Benchmarks {
       },
       {
         profile("stream-triangle") {
-          util.Stream.from(N(0)).take(N(triangleCount)).sum.toLong
+          util.Stream.from(N(0)).take(N(triangleCount)).sumInt
         }
       },
       {
-        profile("stream-triangle-fold-left") {
+        profile("stream-triangle-fold-left-int-import") {
           Stream.from(N(0)).take(N(triangleCount))
-            .foldLeft(0, null: Unboxed.Unboxed[U])(Unboxed.F2.UU_U(_ + _))((u,_) => u).toLong
+            .foldLeft(0, null: Unboxed.Unboxed[Int])(Unboxed.F2.II_I_import(_ + _))((u, _) => u).toLong
+        }
+      },
+      {
+        profile("stream-triangle-fold-left-int-manually-inline") {
+          Stream.from(N(0)).take(N(triangleCount))
+            .foldLeft(0, null: Unboxed.Unboxed[Int])(Unboxed.F2.II_I_manually_inline(_ + _))((u, _) => u).toLong
+        }
+      },
+      {
+        profile("stream-triangle-fold-left-int-val") {
+          Stream.from(N(0)).take(N(triangleCount))
+            .foldLeft(0, null: Unboxed.Unboxed[Int])(Unboxed.F2.II_I_val(_ + _))((u, _) => u).toLong
+        }
+      },
+      {
+        profile("stream-triangle-fold-left-long") {
+          Stream.from(N(0).toLong).take(N(triangleCount))
+            .foldLeft(0, null: Unboxed.Unboxed[Long])(Unboxed.F2.LL_L(_ + _))((u, _) => u).toLong
         }
       },
       {
@@ -57,39 +75,39 @@ object Compilation2Benchmarks {
 
         val env = (new Array[U](20), new Array[B](20), new StackPtr(0), Result())
         profile("stream-triangle-unisonfold") {
-          Stream.from(0.0).take(N(triangleCount))
+          Stream.from(0).take(N(triangleCount))
             .asInstanceOf[Stream[Param]]
             .foldLeft(U0, null:Param)(plusU(env))((u,_) => u).toLong
         }
       }
     )
-    suite(
-      profile("scala-fib") {
-        def fib(n: Int): Int =
-          if (n < 2) n else fib(n - 1) + fib(n - 2)
-        fib(N(21))
-      },
-      {
-        val p = runTerm(Terms.fib)
-        profile("unison-fib") {
-          evalLam(p, r, top, stackU, U0, N(21).toDouble, stackB, null, null).toLong
-        }
-      }
-    )
-    suite(
-      profile("scala-fibPrime") {
-        def fibPrime(n: Int): Int =
-          if (n < 2) n else fibPrime2(n - 1) + fibPrime2(n - 2)
-        def fibPrime2(n: Int): Int =
-          if (n < 2) n else fibPrime(n - 1) + fibPrime(n - 2)
-        fibPrime(N(21))
-      },
-      {
-        val p = runTerm(Terms.fibPrime)
-        profile("unison-fibPrime") {
-          evalLam(p, r, top, stackU, U0, N(21), stackB, null, null).toLong
-        }
-      }
-    )
+//    suite(
+//      profile("scala-fib") {
+//        def fib(n: Int): Int =
+//          if (n < 2) n else fib(n - 1) + fib(n - 2)
+//        fib(N(21))
+//      },
+//      {
+//        val p = runTerm(Terms.fib)
+//        profile("unison-fib") {
+//          evalLam(p, r, top, stackU, U0, N(21), stackB, null, null).toLong
+//        }
+//      }
+//    )
+//    suite(
+//      profile("scala-fibPrime") {
+//        def fibPrime(n: Int): Int =
+//          if (n < 2) n else fibPrime2(n - 1) + fibPrime2(n - 2)
+//        def fibPrime2(n: Int): Int =
+//          if (n < 2) n else fibPrime(n - 1) + fibPrime(n - 2)
+//        fibPrime(N(21))
+//      },
+//      {
+//        val p = runTerm(Terms.fibPrime)
+//        profile("unison-fibPrime") {
+//          evalLam(p, r, top, stackU, U0, N(21), stackB, null, null).toLong
+//        }
+//      }
+//    )
   }
 }

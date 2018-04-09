@@ -2,6 +2,7 @@ package org.unisonweb
 
 import Term._
 import compilation2._
+import org.unisonweb.util.Unboxed.IsUnboxed
 
 object CompilationTests {
   import EasyTest._
@@ -107,7 +108,7 @@ object CompilationTests {
     suite("sequence")(
       test("take") { implicit T =>
         1 to 20 foreach { n =>
-          val xs = replicate(intIn(0,n))(int).map(x => Term.Num(x.toDouble))
+          val xs = replicate(intIn(0,n))(int).map(x => Term.Num(IsUnboxed.intIsUnboxed.fromScala(x)))
           val mySeq = Sequence(xs:_*)
           val theirSeq = Sequence(xs.take(n):_*)
           equal1(eval(Sequence.take(n, mySeq)), eval(theirSeq))

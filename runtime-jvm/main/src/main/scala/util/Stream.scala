@@ -1,9 +1,9 @@
 package org.unisonweb
 package util
 
-import Stream._
-import compilation2.{U, U0}
-import Unboxed.{F1, F2, IsUnboxed, K, Unboxed}
+import org.unisonweb.compilation2.{U, U0}
+import org.unisonweb.util.Stream._
+import org.unisonweb.util.Unboxed.{F1, F2, IsUnboxed, K, Unboxed}
 
 /**
  * Fused stream type based loosely on ideas from Oleg's
@@ -67,10 +67,36 @@ abstract class Stream[A] { self =>
                else k(u,a)
     }
 
-  final def sum(implicit A: A =:= Unboxed[U]): U = {
-    var total = U0
-    self.stage { (u,_) => total += u }.run()
-    total
+//  final def sum(implicit A: A =:= Unboxed[U]): U = {
+//    var total = U0
+//    self.stage { (u,_) => total += u }.run()
+//    total
+//  }
+
+//  final def sum[C](implicit A: A =:= Unboxed[C], C: IsNumeric[C]): C = {
+//    import C.{fromScala, plus, toScala, zero}
+//    var total: U = fromScala(zero)
+//    self.stage { (u,_) =>
+//      total = fromScala(plus(toScala(total), toScala(u)))
+//    }.run()
+//    toScala(total)
+//  }
+
+//  final def sumInt(implicit A: A =:= Unboxed[Int]): Int = {
+//    import IsUnboxed.intIsUnboxed._
+//    var total: U = fromScala(zero)
+//    self.stage { (u,_) =>
+//      total = fromScala(plus(toScala(total), toScala(u)))
+//    }.run()
+//    toScala(total)
+//  }
+
+  final def sumInt(implicit A: A =:= Unboxed[Int]): Int = {
+    var total: Long = 0
+    self.stage { (u,_) =>
+      total = total + u
+    }.run()
+    total.toInt
   }
 
   final def zipWith[B,C](bs: Stream[B])(f: F2[A,B,C]): Stream[C] =
@@ -87,11 +113,37 @@ abstract class Stream[A] { self =>
     }
 
   def foldLeft[B,C](u0: U, b0: B)(f: F2[B,A,B])(extract: (U,B) => C): C = {
+//    println(s"1) foldLeft($u0, $b0)")
     var u = U0; var b = b0
-    val cf = f andThen { (u2,b2) => u = u2; b = b2 }
-    self.stage { (u2,a) => cf(u, b, u2, a) }.run()
+    val cf = f andThen { (u2,b2) =>
+//      println(s"3) $u2, $b2");
+      u = u2; b = b2 }
+    self.stage { (u2,a) => {
+//      println(s"2) $u2, $a");
+      cf(u, b, u2, a) } }.run()
     extract(u,b)
+//    match {
+//      case c =>
+//        println(s"4) $c")
+//        c
+//    }
   }
+
+//  /**
+//    * foldLeft with a primitive Scala accumulator
+//    * @param c0
+//    * @param f
+//    * @param A
+//    * @param C
+//    * @tparam C
+//    * @return
+//    */
+//  final def foldLeftUnboxed[C](c0: C)(f: F2[C,A,C])(implicit A: A =:= Unboxed[C], C: IsUnboxed[C]): C = {
+//    import C.{fromScala, toScala}
+//    var c = c0
+//    val cf = f andThen { (u2,_) => c = C.toScala(u2) }
+//    self.stage { (u2, a) => cf(C.fromScala(c), null, u2, a) }.run()
+//  }
 
   def box[T](f: U => T)(implicit A: A =:= Unboxed[T]): Stream[T] =
     map(new Unboxed.F1[A,T] {
@@ -127,17 +179,43 @@ object Stream {
   case object Done extends Throwable { override def fillInStackTrace = this }
   // idea: case class More(s: Step) extends Throwable { override def fillInStackTrace = this }
 
-  final def constant[A:IsUnboxed](a: A): Stream[Unboxed[A]] =
-    IsUnboxed.fromScala(a) match {
+  def constant(n: Int): Stream[Unboxed[Int]] =
+    IsUnboxed.intIsUnboxed.fromScala(n) match {
       case n => k => () => k(n, null)
     }
 
-  final def from[A:IsUnboxed](a: A): Stream[Unboxed[A]] =
-    IsUnboxed.fromScala(a) match {
-      case n =>
-        k => {
-          var i = n - 1
-          () => { i += 1; k(i,null) }
-        }
+//  final def constant[A](a: A)(A: IsUnboxed[A]): Stream[Unboxed[A]] =
+//    A.fromScala(a) match {
+//      case n => k => () => k(n, null)
+//    }
+
+  final def from(n: Int): Stream[Unboxed[Int]] = {
+    val T = IsUnboxed.intIsUnboxed
+    k => {
+      var i = T.minus(n,1)
+      () => { i += 1; k(T.fromScala(i), null) }
     }
+  }
+
+  final def from(n: Long): Stream[Unboxed[Long]] = {
+    val T = IsUnboxed.longIsUnboxed
+    k => {
+      var i = T.minus(n,1)
+      () => { i += 1; k(T.fromScala(i), null) }
+    }
+  }
+
+  // todo: with I could do something like this, and the compiler proves there's no [A] boxing
+//  final def from[A](a: A)(implicit A:IsUnboxed[A]): Stream[Unboxed[A]] = {
+//    A.fromScala(a) match {
+//      case n =>
+//        k => {
+//          var i: A = A.dec(A.toScala(n))
+//          () => {
+//            i = A.inc(i)
+//            k(A.fromScala(i), null)
+//          }
+//        }
+//    }
+//  }
 }

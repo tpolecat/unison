@@ -7,7 +7,7 @@ object AllTests {
   val tests = suite(
     DecompileTests.tests,
     UtilTests.tests,
-    CompilationTests.tests
+    CompilationTests.tests,
   )
 }
 

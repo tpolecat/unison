@@ -77,7 +77,7 @@ object QuickProfile {
    * optimizations is relevant for performance, but for maximum accuracy it can be a good
    * idea to average results from multiple JVM runs.
    */
-  def profile(label: String, threshold: Double = 0.05)(action: => Long): (String, Double) = {
+  def profile(label: String, threshold: Double = 0.01)(action: => Long): (String, Double) = {
     var N = 16L
     var i = 0
     var startTime = System.nanoTime

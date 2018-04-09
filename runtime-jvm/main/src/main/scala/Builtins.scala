@@ -4,6 +4,7 @@ import compilation2._
 import Term.{Apply, Name, Term}
 import org.unisonweb.compilation2.Value.Lambda
 import org.unisonweb.util.Sequence
+import org.unisonweb.util.Unboxed.IsUnboxed
 
 /* Sketch of convenience functions for constructing builtin functions. */
 object Builtins {
@@ -114,11 +115,16 @@ object Builtins {
   trait Encode[-A] { def encode(r: Result, a: A): U }
   object Encode {
     implicit def encodeExternal[A:Decompile]: Encode[A] =
-      (r, a) => { r.boxed = External(a); U0 }
+      (r: R, a: A) => { r.boxed = External(a); U0 }
+
     implicit val encodeLong: Encode[Long] =
-      (r, a) => { r.boxed = null; a.toDouble }
+      (r, a) => { r.boxed = null; IsUnboxed.longIsUnboxed.fromScala(a) }
+
+    implicit val encodeInt: Encode[Int] =
+      (r, a) => { r.boxed = null; IsUnboxed.intIsUnboxed.fromScala(a) }
+
     implicit val encodeDouble: Encode[Double] =
-      (r, a) => { r.boxed = null; a }
+      (r, a) => { r.boxed = null; IsUnboxed.doubleIsUnboxed.fromScala(a) }
   }
 
   trait Decompile[A] { def decompile(a: A): Term }

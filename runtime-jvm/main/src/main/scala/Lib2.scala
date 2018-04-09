@@ -3,28 +3,30 @@ package org.unisonweb
 import org.unisonweb.Term.{Name, Term}
 import org.unisonweb.compilation2.Value.Lambda
 import org.unisonweb.compilation2._
+import org.unisonweb.util.Unboxed.F1.UnboxedUnaryOperator
+import org.unisonweb.util.Unboxed.F2.UnboxedBinaryOperator
 
 object Lib2 {
 
   val builtins: Name => Computation =
-    List[(Name, NumericBinOp)](
-      ("+", _ + _),
-      ("-", _ - _),
-      ("*", _ * _),
-      ("/", _ / _),
-      ("==", (n1, n2) => boolToNum(n1 == n2)),
-      ("!=", (n1, n2) => boolToNum(n1 != n2)),
-      ("<=", (n1, n2) => boolToNum(n1 <= n2)),
-      (">=", (n1, n2) => boolToNum(n1 >= n2)),
-      ("<", (n1, n2) => boolToNum(n1 < n2)),
-      (">", (n1, n2) => boolToNum(n1 > n2)),
-    ).map {
+    List[(Name, UnboxedBinaryOperator)](
+      ("+", U.liftDDD(_ + _)),
+      ("-", U.liftDDD(_ - _)),
+      ("*", U.liftDDD(_ * _)),
+      ("/", U.liftDDD(_ / _)),
+      ("==", U.liftDDB(_ == _)),
+      ("!=", U.liftDDB(_ != _)),
+      ("<=", U.liftDDB(_ <= _)),
+      (">=", U.liftDDB(_ >= _)),
+      ("<", U.liftDDB(_ < _)),
+      (">", U.liftDDB(_ > _)),
+      ).map {
       case (name, f) =>
         val term = Term.Builtin(name)
         name -> Return(builtin2(term, List("x1", "x2"), f), term)
-    }.toMap ++ Map[Name, NumericUnaryOp](
-      ("not", b => if (b == False) True else False),
-      ("negate", x => -x)
+    }.toMap ++ Map[Name, UnboxedUnaryOperator](
+      ("not", U.liftBB(! _)),
+      ("negate", U.liftDD(- _))
     ).map {
       case (name, f) =>
         val term = Term.Builtin(name)
@@ -34,15 +36,7 @@ object Lib2 {
 
   @inline def boolToNum(b: Boolean): U = if (b) True else False
 
-  abstract class NumericUnaryOp {
-    def apply(n1: U): U
-  }
-
-  abstract class NumericBinOp {
-    def apply(n1: U, n2: U): U
-  }
-
-  def builtin1(decompiled: Term, n: Name, f: NumericUnaryOp): Lambda = {
+  def builtin1(decompiled: Term, n: Name, f: UnboxedUnaryOperator): Lambda = {
     val body: Computation.C1U = (r,x0) => {
       r.boxed = null
       f(x0)
@@ -51,7 +45,7 @@ object Lib2 {
     new Lambda(1, body, decompiled) { def names = ns }
   }
 
-  def builtin2(decompiled: Term, ns: List[Name], f: NumericBinOp): Lambda = {
+  def builtin2(decompiled: Term, ns: List[Name], f: UnboxedBinaryOperator): Lambda = {
     val body: Computation.C2U = (r,x1,x0) => {
       r.boxed = null
       f(x1, x0)
