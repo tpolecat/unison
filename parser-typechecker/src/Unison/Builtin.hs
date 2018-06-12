@@ -21,33 +21,32 @@ import           Unison.Var (Var)
 -- todo: to update these, just inline definition of Parsers.{unsafeParseType, unsafeParseTerm}
 -- then merge Parsers2 back into Parsers (and GC and unused functions)
 -- parse a type, hard-coding the builtins defined in this file
-t :: Var v => String -> Type v
+t :: String -> Type Symbol
 t s = resolveBuiltins builtinTypes Type.builtin $
         Parsers.unsafeParseType s Parser.penv0
 
 -- parse a term, hard-coding the builtins defined in this file
-tm :: Var v => String -> Term v
+tm :: String -> Term Symbol
 tm s = resolveBuiltins builtinTerms Term.builtin $
         Parsers.unsafeParseTerm s Parser.penv0
 
--- substitute free vars from `t` intersect `b` using `mkTerm` on those vs Text names
 resolveBuiltins :: (Foldable f, Functor f, Var v) =>
                  Set v
                  -> (Text -> ABT.Term f v a)
                  -> ABT.Term f v a
                  -> ABT.Term f v a
 resolveBuiltins b mkTerm t = let
-  free = Set.intersection (ABT.freeVars t) b -- Arya asks: does this do anything?  what if we just used `b` without calling `freeVars`?
+  free = Set.intersection (ABT.freeVars t) b
   in ABT.substs [(v, mkTerm (Var.name v)) | v <- Set.toList free] t
 
-builtinTypes :: Var v => Set v
+builtinTypes :: Set Symbol
 builtinTypes = Set.fromList . map Var.named $ [
   "Int64", "UInt64", "Float", "Boolean", "Sequence", "Text", "Stream"]
 
-builtinTerms :: Var v => Set v
+builtinTerms :: Set Symbol
 builtinTerms = Set.map toSymbol (Map.keysSet builtins) where
 
-builtinEnv :: Var v => [(v, Term v)]
+builtinEnv :: [(Symbol, Term Symbol)]
 builtinEnv = (toSymbol &&& Term.ref) <$> Map.keys builtins
 
 toSymbol :: Var v => R.Reference -> v

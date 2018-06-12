@@ -8,8 +8,7 @@ module Unison.Test.FileParser where
   import Unison.Parser
   import qualified Unison.Parser as Parser
   import qualified Unison.Parsers as Parsers
-  import Unison.Parsers (unsafeGetRight)
-  import Unison.Parsers2 (unsafeReadAndParseFile')
+  import Unison.Parsers (unsafeGetRight, unsafeReadAndParseFile')
   import qualified Data.Map as Map
   import qualified Unison.Reference as R
   import Unison.Symbol (Symbol)
