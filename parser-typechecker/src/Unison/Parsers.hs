@@ -33,8 +33,10 @@ parseTerm = parseTerm' [] []
 parseType :: Var v => String -> PEnv -> Either String (Type v)
 parseType = parseType' []
 
+-- note: `FileParser.file` needs Builtin.builtinEnv, not []
 parseFile :: FilePath -> String -> PEnv -> Either String (UnisonFile Symbol)
-parseFile filename s = Parser.run' (Parser.root (FileParser.file [])) s s0 filename
+parseFile filename s =
+  Parser.run' (Parser.root (FileParser.file [])) s s0 filename
 
 parseTerm' :: Var v
            => [(v, Term v)]
