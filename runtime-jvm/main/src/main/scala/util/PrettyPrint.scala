@@ -98,6 +98,9 @@ object PrettyPrint {
   val semicolon = Breakable("; ")
   def semicolons(docs: Seq[PrettyPrint]): PrettyPrint = docs.reduce(_ <> semicolon <> _)
 
+  val comma = Breakable(", ")
+  def commas(docs: Seq[PrettyPrint]): PrettyPrint = docs.reduce(_ <> comma <> _)
+
   def prettyName(name: Name) = parenthesizeIf(isOperatorName(name.toString))(name.toString)
 
   def unqualifiedName(name: Name): String =
@@ -201,6 +204,7 @@ object PrettyPrint {
       "handle " <> prettyTerm(handler, 10) <> softbreak <>
                    prettyTerm(body, 0).nest("  ")
     case Term.Request(id,cid) => prettyId(id, cid)
+    case Tuple(terms) => "(" <> commas(terms.map(prettyTerm)) <> ")"
     case Term.Apply(VarOrBuiltin(name), List(arg1, arg2)) if isOperatorName(unqualifiedName(name)) =>
        parenthesizeGroupIf(precedence > 5) {
         prettyTerm(arg1, 5) <> " " <> infixName(name) <> softbreak <> prettyTerm(arg2, 6).nest("  ")
@@ -244,6 +248,19 @@ object PrettyPrint {
     def unapply(term: Term): Option[Name] = term match {
       case Term.Var(name) => Some(name)
       case Term.Id(Id.Builtin(name)) => Some(name)
+      case _ => None
+    }
+  }
+
+  object Tuple {
+    def unapply(term: Term): Option[List[Term]] = term match {
+      case Term.Apply(
+            Term.Constructor(
+              BuiltinTypes.Tuple.Id,
+              BuiltinTypes.Tuple.cid
+            ),
+            List(h, Tuple(t))) => Some(h :: t)
+      case BuiltinTypes.Unit.term => Some(Nil)
       case _ => None
     }
   }
