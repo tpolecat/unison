@@ -19,12 +19,9 @@ object Builtins {
     c0z("Stream.empty", Stream.empty[Value])
 
 
-  // Stream.fromInt : Int64 -> Stream Integer
-  val Stream_fromInt64 =
-    fp_z("Stream.from-int64", "n", Stream.fromInt64)
-
-  val Stream_fromUInt64 =
-    fp_z("Stream.from-uint64", "n", Stream.fromUInt64)
+  // Stream.fromInt : Integer -> Stream Integer
+  val Stream_fromInt = // Stream.iterate(unison 0)(Integer_inc)
+    fp_z("Stream.from-int64", "n", Stream.fromUnison)
 
   // Stream.cons : a -> Stream a -> Stream a
   val Stream_cons =
@@ -80,8 +77,7 @@ object Builtins {
 
   val streamBuiltins = Map(
     Stream_empty,
-    Stream_fromInt64,
-    Stream_fromUInt64,
+    Stream_fromInt,
     Stream_cons,
     Stream_drop,
     Stream_take,
