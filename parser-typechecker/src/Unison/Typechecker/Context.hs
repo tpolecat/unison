@@ -6,7 +6,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE ViewPatterns #-}
 
-module Unison.Typechecker.Context (synthesizeClosed, Note(..), Cause(..), PathElement(..), Type, Term, errorTerms, innermostErrorTerm, apply) where
+module Unison.Typechecker.Context (synthesizeClosed, Note(..), Cause(..), PathElement(..), Type, Term, TypeVar, errorTerms, innermostErrorTerm, innermostSynthesizeAppCheck, lookupType, apply) where
 
 import           Control.Monad
 import           Control.Monad.Loops (anyM, allM)
@@ -94,6 +94,12 @@ data PathElement v loc
   | InInstantiateL v (Type v loc)
   | InInstantiateR (Type v loc) v
   | InSynthesizeApp (Type v loc) (Term v loc)
+  -- InSynthesizeTrueApp f ft ctx arg
+  | InSynthesizeTrueApp (Term v loc) (Type v loc) (Context v loc) (Term v loc)
+  -- InSynthesizeVectorApp elementVar ctx
+  | InSynthesizeVectorApp v (Context v loc)
+  | InSynthesizeIfApp v (Context v loc)
+  | InSynthesizeAndApp v (Context v loc)
   deriving Show
 
 type ExpectedArgCount = Int
@@ -116,10 +122,34 @@ errorTerms n = Foldable.toList (path n) >>= \e -> case e of
   InCheck e _         -> [e]
   InSynthesizeApp _ e -> [e]
   InSynthesize e      -> [e]
-  _                     -> []
+  _                   -> []
 
 innermostErrorTerm :: Note v loc -> Maybe (Term v loc)
 innermostErrorTerm n = listToMaybe $ errorTerms n
+
+-- instead of digging this out of the path, I think it could be nicer to push
+-- more context on when the path is created, something we can look up more
+-- directly?
+-- Implementation: step through the path, looking for an InCheck followed by an InSynthesizeApp for the same term
+innermostSynthesizeAppCheck :: (Var v, Eq loc, Show loc) => Note v loc -> Maybe (Term v loc, Type v loc)
+innermostSynthesizeAppCheck n = go2 $ foldl' go (Nothing, Nothing) (path n)
+  where
+    -- nothing encountered yet; save the first encountered InCheck
+    go (Nothing, Nothing) (InCheck e _) = (Just e, Nothing)
+    go (Nothing, Nothing) _             = (Nothing, Nothing)
+    -- Check followed by InSynthesizeApp; save both!
+    go (Just e, Nothing)  (InSynthesizeApp t e') =
+      if e == e' then (Just e, Just t)
+      else error $ "this can't happen, can it? "
+                      ++ show t ++ " " ++ show e ++ " " ++ show e'
+    -- Check followed by not InSynthesizeApp; reset.
+    go (Just _, Nothing)  _             = (Nothing, Nothing)
+    go (Nothing, Just _)  _             = error $ "state machine error " ++ show n
+    -- We found them both, so hang onto them
+    go (Just e, Just t)   _             = (Just e, Just t)
+    go2 (Just e, Just t) = Just (e,t)
+    go2 _                = Nothing
+
 
 data Note v loc = Note { cause :: Cause v loc, path :: Seq (PathElement v loc) } deriving Show
 
@@ -504,14 +534,14 @@ synthesizeApp _ _ = error "unpossible - Type.Effect'' pattern always succeeds"
 
 -- For arity 3, creates the type `∀ a . a -> a -> a -> Sequence a`
 -- For arity 2, creates the type `∀ a . a -> a -> Sequence a`
-vectorConstructorOfArity :: (Var v, Ord loc) => Int -> M v loc (Type v loc)
+vectorConstructorOfArity :: (Var v, Ord loc) => Int -> M v loc (TypeVar v loc, Type v loc)
 vectorConstructorOfArity arity = do
   bl <- getBuiltinLocation
   let elementVar = Var.named "elem"
       args = replicate arity (bl, Type.var bl elementVar)
       resultType = Type.app bl (Type.vector bl) (Type.var bl elementVar)
       vt = Type.forall bl elementVar (Type.arrows args resultType)
-  pure vt
+  pure (elementVar, vt)
 
 -- | Synthesize the type of the given term, updating the context in the process.
 -- | Figure 11 from the paper
@@ -558,10 +588,14 @@ synthesize e = scope (InSynthesize e) $ go (minimize' e)
     -- the event that `ft` is an existential?
     ft <- synthesize f
     ctx <- getContext
-    synthesizeApp (apply ctx ft) arg
+    let ft' = apply ctx ft
+    scope (InSynthesizeTrueApp f ft ctx arg) $
+      synthesizeApp ft' arg
   go (Term.Vector' v) = do
-    ft <- vectorConstructorOfArity (Foldable.length v)
-    foldM synthesizeApp ft v
+    ctx <- getContext
+    (elementVar, ft) <- vectorConstructorOfArity (Foldable.length v)
+    scope (InSynthesizeVectorApp (TypeVar.underlying elementVar) ctx) $
+      foldM synthesizeApp ft v
   go (Term.Let1' binding e) | Set.null (ABT.freeVars binding) = do
     -- special case when it is definitely safe to generalize - binding contains
     -- no free variables, i.e. `let id x = x in ...`
@@ -610,7 +644,11 @@ synthesize e = scope (InSynthesize e) $ go (minimize' e)
     t <- synthesize e
     (ctx, _, ctx2) <- breakAt marker <$> getContext
     generalizeExistentials ctx2 t <$ setContext ctx
-  go (Term.If' cond t f) = foldM synthesizeApp (Type.iff' l) [cond, t, f]
+  go (Term.If' cond t f) = do
+    let (v, ifTyp) = Type.iff' l
+    ctx <- getContext
+    scope (InSynthesizeIfApp (TypeVar.underlying v) ctx) $
+      foldM synthesizeApp ifTyp [cond, t, f]
   go (Term.And' a b) = foldM synthesizeApp (Type.andor' l) [a, b]
   go (Term.Or' a b) = foldM synthesizeApp (Type.andor' l) [a, b]
   -- { 42 }

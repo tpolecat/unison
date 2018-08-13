@@ -200,8 +200,8 @@ iff = forall () aa $ arrows (f <$> [boolean(), a, a]) a
         a = var () aa
         f x = ((), x)
 
-iff' :: Var v => a -> AnnotatedType v a
-iff' loc = forall loc aa $ arrows (f <$> [boolean loc, a, a]) a
+iff' :: Var v => a -> (v, AnnotatedType v a)
+iff' loc = (aa, forall loc aa $ arrows (f <$> [boolean loc, a, a]) a)
   where aa = ABT.v' "a"
         a = var loc aa
         f x = (loc, x)

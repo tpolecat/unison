@@ -34,6 +34,7 @@ import qualified Unison.Reference           as R
 import           Unison.Result              (Note (..))
 import qualified Unison.Type                as Type
 import qualified Unison.Typechecker.Context as C
+import qualified Unison.TypeVar             as TypeVar
 import qualified Unison.Util.AnnotatedText  as AT
 import           Unison.Util.ColorText      (StyledText)
 import qualified Unison.Util.ColorText      as Color
@@ -56,6 +57,14 @@ data TypeError v loc
              , mismatchSite :: loc
              , note         :: C.Note v loc
              }
+  | AppMismatch
+    { mismatchSite :: loc
+    , functionType :: C.Type v loc
+    , solvedVars   :: [(v, Maybe (C.Type v loc))]
+    , inputType    :: C.Type v loc
+    , outputType   :: C.Type v loc
+    , note         :: C.Note v loc
+    }
   | AbilityCheckFailure { ambient                 :: [C.Type v loc]
                         , requested               :: [C.Type v loc]
                         , abilityCheckFailureSite :: loc
@@ -63,7 +72,7 @@ data TypeError v loc
                         }
   | Other (C.Note v loc)
 
-renderTypeError :: forall v a. (Var v, Annotated a, Eq a, Show a)
+renderTypeError :: forall v a. (Var v, Annotated a, Ord a, Show a)
                 => Env
                 -> TypeError v a
                 -> String
@@ -103,6 +112,22 @@ renderTypeError env e src = AT.AnnotatedDocument . Seq.fromList $ case e of
     , "\n"
     , "note debug:\n"
     ] ++ summary note
+  AppMismatch {..} ->
+    [ "The function application at "
+    , (fromString . annotatedToEnglish) mismatchSite
+    , " has a type mismatch (", AT.Describe Color.ErrorSite, " below):\n\n"
+    , annotatedAsErrorSite src mismatchSite
+    , "\n"
+    , "-----todo-----\n"
+    , "debug function application:\n"
+    , "  functionType: ", AT.Text $ renderType' env functionType, "\n"
+    , "     inputType: ", AT.Text $ renderType' env inputType, "\n"
+    , "    outputType: ", AT.Text $ renderType' env outputType, "\n"
+    , "    solvedVars: [", AT.Text $ commas renderSolvedVar solvedVars, "]\n"
+    ] ++ summary note
+    where renderSolvedVar (v, maybeType) =
+            maybe mempty (\typ -> renderTypeVar v <> " = " <> renderType' env typ) maybeType
+          renderTypeVar v = fromString $ show v -- todo?
   AbilityCheckFailure {..} ->
     [ "The expression at "
     , (fromString . annotatedToEnglish) abilityCheckFailureSite
@@ -147,9 +172,22 @@ renderTypeError env e src = AT.AnnotatedDocument . Seq.fromList $ case e of
       C.InInstantiateR t v ->
         ["InInstantiateR t=", AT.Text $ renderType' env t
                       ," v=", AT.Text $ renderVar v]
-      C.InSynthesizeApp t e -> ["InSynthesizeApp"
-        ," t=", AT.Text $ renderType' env t
-        ,", e=", renderTerm e]
+      C.InSynthesizeApp t e ->
+        ["InSynthesizeApp t=", AT.Text $ renderType' env t
+                      ,", e=", renderTerm e]
+      C.InSynthesizeTrueApp f ft ctx arg ->
+        ["InSynthesizeTrueApp f=", renderTerm f
+                         ,", ft=", AT.Text $ renderType' env ft
+                         ,", ft(ctx)=", AT.Text $ renderType' env (C.apply ctx ft)
+                         ,", arg=", renderTerm arg
+        ]
+      C.InSynthesizeVectorApp v _ctx ->
+        ["InSynthesizeVectorApp v=", AT.Text $ renderVar v]
+      C.InSynthesizeIfApp v _ctx ->
+        ["InSynthesizeIfApp v=", AT.Text $ renderVar v]
+      C.InSynthesizeAndApp v _ctx ->
+        ["InSynthesizeAndApp v=", AT.Text $ renderVar v]
+
     simpleCause :: C.Cause v a -> [AT.Section Color.Style]
     simpleCause = \case
       C.TypeMismatch c ->
@@ -296,11 +334,7 @@ rangeForAnnotated a = case ann a of
   Intrinsic     -> Nothing
   Ann start end -> Just $ Range start end
 
-
--- highlightString :: String -> [()]
-
---
-typeErrorFromNote :: forall loc v. (Ord loc, Var v) => C.Note v loc -> TypeError v loc
+typeErrorFromNote :: forall loc v. (Ord loc, Show loc, Var v) => C.Note v loc -> TypeError v loc
 typeErrorFromNote n@(C.Note (C.TypeMismatch ctx) path) =
   let
     pathl = toList path
@@ -308,10 +342,17 @@ typeErrorFromNote n@(C.Note (C.TypeMismatch ctx) path) =
     firstSubtype = listToMaybe subtypes
     lastSubtype = if null subtypes then Nothing else Just (last subtypes)
     innermostTerm = C.innermostErrorTerm n
+    innermostSynthesizeAppCheck = C.innermostSynthesizeAppCheck n
     -- replace any type vars with their solutions before returning
     sub t = C.apply ctx t
-  in case (firstSubtype, lastSubtype, innermostTerm) of
-       (Just (leaf1, leaf2), Just (overall1, overall2), Just mismatchSite) ->
+  in case (firstSubtype, lastSubtype, innermostTerm, innermostSynthesizeAppCheck) of
+       (_, _, Just mismatchSite, Just (_checkTerm, t@(Type.Arrow' i o))) ->
+        let solved :: [(v, Maybe (C.Type v loc))]
+            solved = lookup . TypeVar.underlying <$> toList (ABT.freeVars t)
+            lookup :: v -> (v, Maybe (C.Type v loc))
+            lookup v = (v, C.lookupType ctx v) in
+        AppMismatch (ABT.annotation mismatchSite) t solved i o n
+       (Just (leaf1, leaf2), Just (overall1, overall2), Just mismatchSite, _) ->
          Mismatch (sub overall1) (sub overall2)
                   (sub leaf1) (sub leaf2)
                   (ABT.annotation mismatchSite)
