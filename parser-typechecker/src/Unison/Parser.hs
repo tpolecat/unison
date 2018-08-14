@@ -77,13 +77,18 @@ data Error v
 
 data Ann =
   Intrinsic |
+  -- todo? Codebase { hash :: Hash, path :: _} |
   Ann { start :: L.Pos, end :: L.Pos } deriving (Eq, Ord, Show)
 
+unsafeJoinAnn :: Ann -> Ann -> Ann
+unsafeJoinAnn (Ann s1 _) (Ann _ e2) = Ann s1 e2
+unsafeJoinAnn x y = error $
+  "Compiler bug! Tried to combine terms annotated with ("
+        ++ show x ++ ") and (" ++ show y ++ ")"
+
+-- This is *so* not a Semigroup!
 instance Semigroup Ann where
-  Ann s1 _ <> Ann _ e2 = Ann s1 e2
-  Intrinsic <> Intrinsic = error "FUN SURPRISE!"
-  x <> y = error $ "Compiler bug! Tried to combine terms annotated with ("
-                   ++ show x ++ ") and (" ++ show y ++ ")"
+  (<>) = unsafeJoinAnn
 
 tokenToPair :: L.Token a -> (Ann, a)
 tokenToPair t = (ann t, L.payload t)

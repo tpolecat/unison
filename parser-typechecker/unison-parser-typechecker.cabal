@@ -35,6 +35,7 @@ library
 
   exposed-modules:
     Unison.ABT
+    Unison.VAnn
     Unison.Blank
     Unison.Builtin
     Unison.Codecs
