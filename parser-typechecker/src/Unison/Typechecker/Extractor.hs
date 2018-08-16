@@ -22,7 +22,12 @@ path = NoteExtractor $ pure . toList . C.path
 mismatchedTerm :: NoteExtractor v loc (Maybe (C.Term v loc))
 mismatchedTerm = NoteExtractor $ pure . C.innermostErrorTerm
 
--- subpath :: [Pattern] ->
+adjacent :: PathExtractor v loc a -> PathExtractor v loc b -> NoteExtractor v loc (a, b)
+adjacent (PathExtractor a) (PathExtractor b) =
+  NoteExtractor $ go Nothing . toList . C.path where
+  go _ [] = Nothing
+  go Nothing (h:t) = go (a h) t
+  go (Just a) (h:t) = case b h of Nothing -> go Nothing t; Just b -> Just (a,b)
 
 -- App
 -- = And
