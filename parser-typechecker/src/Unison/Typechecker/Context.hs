@@ -1053,6 +1053,7 @@ instantiateL _ v t | debugEnabled && traceShow ("instantiateL"::String, v, t) Fa
 instantiateL blank v t = scope (InInstantiateL v t) $ do
   getContext >>= \ctx -> case Type.monotype t >>= solve ctx v of
     Just ctx -> setContext ctx -- InstLSolve
+    Nothing | not (v `elem` unsolved ctx) -> failWith $ TypeMismatch ctx
     Nothing -> case t of
       Type.Existential' _ v2 | ordered ctx v v2 -> -- InstLReach (both are existential, set v2 = v)
         maybe (failWith $ TypeMismatch ctx) setContext $
