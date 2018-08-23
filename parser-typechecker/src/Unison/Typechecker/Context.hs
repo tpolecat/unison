@@ -713,16 +713,14 @@ synthesize e = scope (InSynthesize e) $ do
     scope InAndApp $ synthesizeApps (Type.andor' l) [a, b]
   go (Term.Or' a b) =
     scope InOrApp $ synthesizeApps (Type.andor' l) [a, b]
-  go (Term.Match' scrutinee cases) = do
+  go e@(Term.Match' scrutinee cases) = do
     scrutineeType <- synthesize scrutinee
     outputTypev <- freshenVar (Var.named "match-output")
     let outputType = Type.existential' l B.Blank outputTypev
     appendContext "synth case" $ context [existential outputTypev]
     case cases of -- only relevant with 2 or more cases, but 1 is safe too.
       [] -> pure ()
-      Term.MatchCase _ _ t : _ -> scope (InMatch (ABT.annotation t)) $ do
-        scrutineeType <- applyM scrutineeType
-        outputType <- applyM outputType
+      Term.MatchCase _ _ _ : _ -> scope (InMatch (ABT.annotation e)) $
         Foldable.traverse_ (checkCase scrutineeType outputType) cases
     ctx <- getContext
     pure $ apply ctx outputType
@@ -741,6 +739,8 @@ checkCase :: forall v loc . (Var v, Ord loc)
           -> Term.MatchCase loc (Term v loc)
           -> M v loc ()
 checkCase scrutineeType outputType (Term.MatchCase pat guard rhs) = do
+  scrutineeType <- applyM scrutineeType
+  outputType <- applyM outputType
   m <- freshNamed "check-case"
   appendContext "check case" $ context [Marker m]
   let peel t = case t of
