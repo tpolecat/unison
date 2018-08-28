@@ -35,20 +35,20 @@ data F a
   | Arrow a a
   | Ann a K.Kind
   | App a a
-  | Effect a a
-  | Effects [a]
+  | Effect a a -- effect type (either a single var or Effects list), value type
+  | Effects Bool [a] -- can generalize?, effect list
   | Forall a
   deriving (Foldable,Functor,Generic,Generic1,Traversable)
 
 instance Eq1 F where (==#) = (==)
 instance Show1 F where showsPrec1 = showsPrec
-instance Eq a => Eq (F a) where
+instance Eq a => Eq (F a) where -- todo: derive automatically
   Ref r == Ref r2 = r == r2
   Arrow i o == Arrow i2 o2 = i == i2 && o == o2
   Ann a k == Ann a2 k2 = a == a2 && k == k2
   App f a == App f2 a2 = f == f2 && a == a2
   Effect es t == Effect es2 t2 = es == es2 && t == t2
-  Effects es1 == Effects es2 = es1 == es2
+  Effects can1 es1 == Effects can2 es2 = es1 == es2 && can1 == can2
   Forall a == Forall b = a == b
   _ == _ = False
 
@@ -92,10 +92,11 @@ pattern Ann' t k <- ABT.Tm' (Ann t k)
 pattern App' f x <- ABT.Tm' (App f x)
 pattern Apps' f args <- (unApps -> Just (f, args))
 pattern Pure' t <- (unPure -> Just t)
-pattern Effects' es <- ABT.Tm' (Effects es)
+pattern Effects' es <- ABT.Tm' (Effects _ es)
+pattern EffectsCanGeneralize' can es <- ABT.Tm' (Effects can es)
 -- Effect1' must match at least one effect
 pattern Effect1' e t <- ABT.Tm' (Effect e t)
-pattern Effect' es t <- (unEffects1 -> Just (es, t))
+--pattern Effect' es t <- (unEffects1 -> Just (es, t))
 pattern Effect'' es t <- (unEffect0 -> (es, t))
 -- Effect0' may match zero effects
 pattern Effect0' es t <- (unEffect0 -> (es, t))
@@ -142,7 +143,7 @@ unTuple t = (case t of
           go _ = Nothing
 
 unEffect0 :: Ord v => AnnotatedType v a -> ([AnnotatedType v a], AnnotatedType v a)
-unEffect0 (Effect1' e a) = (flattenEffects e, a)
+unEffect0 (Effect1' e a) = (snd $ flattenEffects False [e], a)
 unEffect0 t = ([], t)
 
 unEffects1 :: Ord v => AnnotatedType v a -> Maybe ([AnnotatedType v a], AnnotatedType v a)
@@ -278,24 +279,33 @@ arrows ts result = foldr go result ts where
   go (a,t) result = arrow a t result
 
 -- The types of effectful computations
-effect :: Ord v => a -> [AnnotatedType v a] -> AnnotatedType v a -> AnnotatedType v a
-effect a es (Effect1' fs t) =
-  let es' = (es >>= flattenEffects) ++ flattenEffects fs
-  in ABT.tm' a (Effect (ABT.tm' a (Effects es')) t)
-effect a es t = ABT.tm' a (Effect (ABT.tm' a (Effects es)) t)
+effect :: Ord v => a -> Bool -> [AnnotatedType v a] -> AnnotatedType v a -> AnnotatedType v a
+effect a canGeneralize es (Effect1' f t) =
+  let (canEs, es') = flattenEffects canGeneralize es
+      (canFs, fs') = flattenEffects canEs [f]
+      effects = es' ++ fs'
+  in ABT.tm' a (Effect (ABT.tm' a (Effects canFs effects)) t)
+effect a can es t = ABT.tm' a (Effect (ABT.tm' a (Effects can es)) t)
 
-effects :: Ord v => a -> [AnnotatedType v a] -> AnnotatedType v a
-effects a es = ABT.tm' a (Effects $ es >>= flattenEffects)
+effects :: Ord v => a -> Bool -> [AnnotatedType v a] -> AnnotatedType v a
+effects a canGeneralize es =
+  let (canGeneralize', es') = flattenEffects canGeneralize es
+  in ABT.tm' a (Effects canGeneralize' es')
 
 effect1 :: Ord v => a -> AnnotatedType v a -> AnnotatedType v a -> AnnotatedType v a
-effect1 a es (Effect1' fs t) =
-  let es' = flattenEffects es ++ flattenEffects fs
-  in ABT.tm' a (Effect (ABT.tm' a (Effects es')) t)
+effect1 a e (Effect1' f t) =
+  let (canGeneralizeEs, e') = flattenEffects False [e]
+      (canGeneralizeFs, f') = flattenEffects False [f]
+      canGeneralize = canGeneralizeEs || canGeneralizeFs
+      effects = e' ++ f'
+  in ABT.tm' a (Effect (ABT.tm' a (Effects canGeneralize effects)) t)
 effect1 a es t = ABT.tm' a (Effect es t)
 
-flattenEffects :: AnnotatedType v a -> [AnnotatedType v a]
-flattenEffects (Effects' es) = es >>= flattenEffects
-flattenEffects es = [es]
+flattenEffects :: Bool -> [AnnotatedType v a] -> (Bool, [AnnotatedType v a])
+flattenEffects can [] = (can, [])
+flattenEffects can (h:t) = case h of
+  EffectsCanGeneralize' can' es -> flattenEffects (can || can') (es ++ t)
+  _ -> case flattenEffects can t of (b, ts) -> (b, h : ts)
 
 -- The types of first-class effect values
 -- which get deconstructed in effect handlers.
@@ -303,9 +313,10 @@ effectV :: Ord v => a -> (a, AnnotatedType v a) -> (a, AnnotatedType v a) -> Ann
 effectV builtinA e t = apps (builtin builtinA "Effect") [e, t]
 
 -- Strips effects from a type. E.g. `{e} a` becomes `a`.
-stripEffect :: Ord v => AnnotatedType v a -> ([AnnotatedType v a], AnnotatedType v a)
-stripEffect (Effect' e t) = case stripEffect t of (ei, t) -> (e ++ ei, t)
-stripEffect t = ([], t)
+--stripEffect :: Ord v => AnnotatedType v a -> ([AnnotatedType v a], AnnotatedType v a)
+--stripEffect (Effect' e t) = case stripEffect t of (ei, t) -> (e ++ ei, t)
+--stripEffect t = ([], t)
+
 -- The type of the flipped function application operator:
 -- `(a -> (a -> b) -> b)`
 flipApply :: Var v => Type v -> Type v
@@ -353,9 +364,9 @@ instance Hashable1 F where
       --   a) {Remote, Abort} (() -> {Remote} ()) should hash the same as
       --   b) {Abort, Remote} (() -> {Remote} ()) but should hash differently from
       --   c) {Remote, Abort} (() -> {Abort} ())
-      Effects es -> let
+      Effects b es -> let
         (hs, _) = hashCycle es
-        in [tag 4] ++ map hashed hs
+        in [tag 4, Hashable.accumulateToken b] ++ map hashed hs
       Effect e t -> [tag 5, hashed (hash e), hashed (hash t)]
       Forall a -> [tag 6, hashed (hash a)]
 
@@ -368,8 +379,10 @@ instance Show a => Show (F a) where
       showParen (p > 1) $ showsPrec 0 t <> s":" <> showsPrec 0 k
     go p (App f x) =
       showParen (p > 9) $ showsPrec 9 f <> s" " <> showsPrec 10 x
-    go p (Effects es) = showParen (p > 0) $
+    go p (Effects True es) = showParen (p > 0) $
       s"{" <> showsPrec 0 es <> s"}"
+    go p (Effects False es) = showParen (p > 0) $
+      s"{|" <> showsPrec 0 es <> s"|}"
     go p (Effect e t) = showParen (p > 0) $
      showsPrec 0 e <> s" " <> showsPrec p t
     go p (Forall body) = case p of
